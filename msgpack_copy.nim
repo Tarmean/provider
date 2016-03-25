@@ -24,9 +24,7 @@
 #-------------------------------------
 
 import streams, endians, strutils, sequtils, algorithm, math, hashes
-import tables, intsets, lists, queues, sets, strtabs, critbits, macros, net
-
-type Interface = Stream | Socket
+import tables, intsets, lists, queues, sets, strtabs, critbits, macros
 
 const
   pack_value_nil = chr(0xc0)
@@ -51,24 +49,6 @@ when system.cpuEndian == littleEndian:
   proc take8_16(val: uint16): uint8 {.inline.} = val and 0xFF
   proc take8_32(val: uint32): uint8 {.inline.} = val and 0xFF
   proc take8_64(val: uint64): uint8 {.inline.} = uint8(val and 0xFF)
-
-  proc write(s: Socket, v: string) = s.send v
-  proc write(s: Socket, c:  char) {.inline.} =
-    discard s.send(unsafeAddr(c), sizeof(c))
-  proc write(s: Socket, c:  uint8) {.inline.} =
-    discard s.send(unsafeAddr(c), sizeof(c))
-  proc store16(s: Socket, v: uint16) =
-      var c: uint16
-      swapEndian16(addr(c), unsafeAddr(v))
-      discard s.send(addr(c), sizeof(c))
-  proc store32(s: Socket, v: uint32) =
-      var c: uint32
-      swapEndian32(addr(c), unsafeAddr(v))
-      discard s.send(addr(c), sizeof(c))
-  proc store64(s: Socket, v: uint64) =
-      var c: uint64
-      swapEndian64(addr(c), unsafeAddr(v))
-      discard s.send(addr(c), sizeof(c))
 
   proc store16(s: Stream, val: uint16) =
     var res: uint16
@@ -97,37 +77,26 @@ else:
   proc take8_32(val: uint32): uint8 {.inline.} = (val shr 24) and 0xFF
   proc take8_64(val: uint64): uint8 {.inline.} = uint8((val shr 56) and 0xFF)
   
-  proc unstore8(s: Socket): uint8 = discard s.recv(addr(result), sizeof(result))
-  proc unstore16(s: Socket): uint16 = discard s.recv(addr(result), sizeof(result))
-  proc unstore32(s: Socket): uint32 = discard s.recv(addr(result), sizeof(result))
-  proc unstore64(s: Socket): uint64 = discard s.recv(addr(result), sizeof(result))
-  proc store8(s: Socket,  v: var uint8) = discard s.send(addr(v), sizeof(v))
-  proc store16(s: Socket, v: var uint16) = discard s.send(addr(v), sizeof(v))
-  proc store32(s: Socket, v: var uint32) = discard s.send(addr(v), sizeof(v))
-  proc store64(s: Socket, v: var uint64) = discard s.send(addr(v), sizeof(v))
-
-  proc store16(s: Interface, val: uint16) = s.write(val)
-  proc store32(s: Interface, val: uint32) = s.write(val)
-  proc store64(s: Interface, val: uint64) = s.write(val)
+  proc store16(s: Stream, val: uint16) = s.write(val)
+  proc store32(s: Stream, val: uint32) = s.write(val)
+  proc store64(s: Stream, val: uint64) = s.write(val)
   proc unstore16(s: Stream): uint16 = cast[uint16](s.readInt16)
   proc unstore32(s: Stream): uint32 = cast[uint32](s.readInt32)
   proc unstore64(s: Stream): uint64 = cast[uint64](s.readInt64)
-
-  proc write(s: Socket, c: char) {.inline.} = store8(s, c)
 
 proc take8_8[T:uint8|char|int8](val: T): uint8 {.inline.} = uint8(val)
 proc take16_8[T:uint8|char|int8](val: T): uint16 {.inline.} = uint16(val)
 proc take32_8[T:uint8|char|int8](val: T): uint32 {.inline.} = uint32(val)
 proc take64_8[T:uint8|char|int8](val: T): uint64 {.inline.} = uint64(val)
 
-proc pack_bool(s: Interface, val: bool) =
+proc pack_bool(s: Stream, val: bool) =
   if val: s.write(chr(0xc3))
   else: s.write(chr(0xc2))
 
-proc pack_imp_nil(s: Interface) =
+proc pack_imp_nil(s: Stream) =
   s.write(chr(0xc0))
 
-proc pack_imp_uint8(s: Interface, val: uint8) =
+proc pack_imp_uint8(s: Stream, val: uint8) =
   if val < uint8(1 shl 7):
     #fixnum
     s.write(take8_8(val))
@@ -136,14 +105,14 @@ proc pack_imp_uint8(s: Interface, val: uint8) =
     s.write(chr(0xcc))
     s.write(take8_8(val))
 
-proc unpack_imp_uint8(s: Interface): uint8 =
+proc unpack_imp_uint8(s: Stream): uint8 =
   let c = s.readChar
   if c < chr(128): result = take8_8(c)
   elif c == chr(0xcc):
     result = uint8(s.readChar)
   else: raise conversionError("uint8")
 
-proc pack_imp_uint16(s: Interface, val: uint16) =
+proc pack_imp_uint16(s: Stream, val: uint16) =
   if val < uint16(1 shl 7):
     #fixnum
     s.write(take8_16(val))
@@ -156,7 +125,7 @@ proc pack_imp_uint16(s: Interface, val: uint16) =
     s.write(chr(0xcd))
     s.store16(val)
 
-proc unpack_imp_uint16(s: Interface): uint16 =
+proc unpack_imp_uint16(s: Stream): uint16 =
   let c = s.readChar
   if c < chr(128): result = take16_8(c)
   elif c == chr(0xcc):
@@ -165,7 +134,7 @@ proc unpack_imp_uint16(s: Interface): uint16 =
     result = s.unstore16()
   else: raise conversionError("uint16")
 
-proc pack_imp_uint32(s: Interface, val: uint32) =
+proc pack_imp_uint32(s: Stream, val: uint32) =
   if val < uint32(1 shl 8):
     if val < uint32(1 shl 7):
       #fixnum
@@ -184,7 +153,7 @@ proc pack_imp_uint32(s: Interface, val: uint32) =
       s.write(chr(0xce))
       s.store32(val)
 
-proc unpack_imp_uint32(s: Interface): uint32 =
+proc unpack_imp_uint32(s: Stream): uint32 =
   let c = s.readChar
   if c < chr(128): result = take32_8(c)
   elif c == chr(0xcc):
@@ -195,7 +164,7 @@ proc unpack_imp_uint32(s: Interface): uint32 =
     result = s.unstore32()
   else: raise conversionError("uint32")
 
-proc pack_imp_uint64(s: Interface, val: uint64) =
+proc pack_imp_uint64(s: Stream, val: uint64) =
   if val < uint64(1 shl 8):
     if val < uint64(1 shl 7):
       #fixnum
@@ -218,7 +187,7 @@ proc pack_imp_uint64(s: Interface, val: uint64) =
       s.write(chr(0xcf))
       s.store64(val)
 
-proc unpack_imp_uint64*(s: Interface): uint64 =
+proc unpack_imp_uint64*(s: Stream): uint64 =
   let c = s.readChar
   if c < chr(128): result = take64_8(c)
   elif c == chr(0xcc):
@@ -231,7 +200,7 @@ proc unpack_imp_uint64*(s: Interface): uint64 =
     result = s.unstore64()
   else: raise conversionError("uint64")
 
-proc pack_imp_int8(s: Interface, val: int8) =
+proc pack_imp_int8(s: Stream, val: int8) =
   if val < -(1 shl 5):
     #signed 8
     s.write(chr(0xd0))
@@ -240,7 +209,7 @@ proc pack_imp_int8(s: Interface, val: int8) =
     #fixnum
     s.write(take8_8(uint8(val)))
 
-proc unpack_imp_int8(s: Interface): int8 =
+proc unpack_imp_int8(s: Stream): int8 =
   let c = s.readChar
   if c >= chr(0xe0) and c <= chr(0xff):
     result = cast[int8](c)
@@ -250,8 +219,7 @@ proc unpack_imp_int8(s: Interface): int8 =
     result = cast[int8](s.readChar)
   else: raise conversionError("int8")
 
-
-proc pack_imp_int16(s: Interface, val: int16) =
+proc pack_imp_int16(s: Stream, val: int16) =
   if val < -(1 shl 5):
     if val < -(1 shl 7):
       #signed 16
@@ -276,7 +244,7 @@ proc pack_imp_int16(s: Interface, val: int16) =
       s.write(chr(0xcd))
       s.store16(uint16(val))
 
-proc unpack_imp_int16(s: Interface): int16 =
+proc unpack_imp_int16(s: Stream): int16 =
   let c = s.readChar
   if c >= chr(0xe0) and c <= chr(0xff):
     result = int16(cast[int8](c))
@@ -292,7 +260,7 @@ proc unpack_imp_int16(s: Interface): int16 =
     result = cast[int16](s.unstore16)
   else: raise conversionError("int16")
 
-proc pack_imp_int32(s: Interface, val: int32) =
+proc pack_imp_int32(s: Stream, val: int32) =
   if val < -(1 shl 5):
     if val < -(1 shl 15):
       #signed 32
@@ -325,7 +293,7 @@ proc pack_imp_int32(s: Interface, val: int32) =
       s.write(chr(0xce))
       s.store32(uint32(val))
 
-proc unpack_imp_int32(s: Interface): int32 =
+proc unpack_imp_int32(s: Stream): int32 =
   let c = s.readChar
   if c >= chr(0xe0) and c <= chr(0xff):
     result = int32(cast[int8](c))
@@ -345,7 +313,7 @@ proc unpack_imp_int32(s: Interface): int32 =
     result = cast[int32](s.unstore32)
   else: raise conversionError("int32")
 
-proc pack_imp_int64(s: Interface, val: int64) =
+proc pack_imp_int64(s: Stream, val: int64) =
   if val < -(1 shl 5):
     if val < -(1 shl 31):
       #signed 64
@@ -386,7 +354,7 @@ proc pack_imp_int64(s: Interface, val: int64) =
       s.write(chr(0xcf))
       s.store64(uint64(val))
 
-proc unpack_imp_int64*(s: Interface): int64 =
+proc unpack_imp_int64*(s: Stream): int64 =
   let c = s.readChar
   if c >= chr(0xe0) and c <= chr(0xff):
     result = int64(cast[int8](c))
@@ -410,14 +378,14 @@ proc unpack_imp_int64*(s: Interface): int64 =
     result = cast[int64](s.unstore64)
   else: raise conversionError("int64")
 
-proc pack_imp_int(s: Interface, val: int) =
+proc pack_imp_int(s: Stream, val: int) =
   case sizeof(val)
   of 1: s.pack_imp_int8(int8(val))
   of 2: s.pack_imp_int16(int16(val))
   of 4: s.pack_imp_int32(int32(val))
   else: s.pack_imp_int64(int64(val))
 
-proc pack_array*(s: Interface, len: int) =
+proc pack_array*(s: Stream, len: int) =
   if len <= 0x0F:
     s.write(chr(0b10010000 or (len and 0x0F)))
   elif len > 0x0F and len <= 0xFFFF:
@@ -427,7 +395,7 @@ proc pack_array*(s: Interface, len: int) =
     s.write(chr(0xdd))
     s.store32(uint32(len))
 
-proc pack_map*(s: Interface, len: int) =
+proc pack_map*(s: Stream, len: int) =
   if len <= 0x0F:
     s.write(chr(0b10000000 or (len and 0x0F)))
   elif len > 0x0F and len <= 0xFFFF:
@@ -437,7 +405,7 @@ proc pack_map*(s: Interface, len: int) =
     s.write(chr(0xdf))
     s.store32(uint32(len))
 
-proc pack_bin*(s: Interface, len: int) =
+proc pack_bin*(s: Stream, len: int) =
   if len <= 0xFF:
     s.write(chr(0xc4))
     s.write(uint8(len))
@@ -448,7 +416,7 @@ proc pack_bin*(s: Interface, len: int) =
     s.write(chr(0xc6))
     s.store32(uint32(len))
 
-proc pack_ext*(s: Interface, len: int, exttype: int8) =
+proc pack_ext*(s: Stream, len: int, exttype: int8) =
   case len
   of 1:
     s.write(chr(0xd4))
@@ -479,7 +447,7 @@ proc pack_ext*(s: Interface, len: int, exttype: int8) =
       s.store32(uint32(len))
       s.write(exttype)
 
-proc pack_string*(s: Interface, len: int) =
+proc pack_string*(s: Stream, len: int) =
   if len < 32:
     var d = uint8(0xa0) or uint8(len)
     s.write(take8_8(d))
@@ -493,43 +461,43 @@ proc pack_string*(s: Interface, len: int) =
     s.write(chr(0xdb))
     s.store32(uint32(len))
 
-proc pack_type*(s: Interface, val: bool) =
+proc pack_type*(s: Stream, val: bool) =
   s.pack_bool(val)
 
-proc pack_type*(s: Interface, val: char) =
+proc pack_type*(s: Stream, val: char) =
   s.pack_imp_uint8(ord(val))
 
-proc pack_type*(s: Interface, val: string) =
+proc pack_type*(s: Stream, val: string) =
   if isNil(val): s.pack_imp_nil()
   else:
     s.pack_string(val.len)
     s.write(val)
 
-proc pack_type*(s: Interface, val: uint8) =
+proc pack_type*(s: Stream, val: uint8) =
   s.pack_imp_uint8(val)
 
-proc pack_type*(s: Interface, val: uint16) =
+proc pack_type*(s: Stream, val: uint16) =
   s.pack_imp_uint16(val)
 
-proc pack_type*(s: Interface, val: uint32) =
+proc pack_type*(s: Stream, val: uint32) =
   s.pack_imp_uint32(val)
 
-proc pack_type*(s: Interface, val: uint64) =
+proc pack_type*(s: Stream, val: uint64) =
   s.pack_imp_uint64(val)
 
-proc pack_type*(s: Interface, val: int8) =
+proc pack_type*(s: Stream, val: int8) =
   s.pack_imp_int8(val)
 
-proc pack_type*(s: Interface, val: int16) =
+proc pack_type*(s: Stream, val: int16) =
   s.pack_imp_int16(val)
 
-proc pack_type*(s: Interface, val: int32) =
+proc pack_type*(s: Stream, val: int32) =
   s.pack_imp_int32(val)
 
-proc pack_type*(s: Interface, val: int64) =
+proc pack_type*(s: Stream, val: int64) =
   s.pack_imp_int64(val)
 
-proc pack_int_imp_select[T](s: Interface, val: T) =
+proc pack_int_imp_select[T](s: Stream, val: T) =
   when sizeof(val) == 1:
     s.pack_imp_int8(int8(val))
   elif sizeof(val) == 2:
@@ -539,7 +507,7 @@ proc pack_int_imp_select[T](s: Interface, val: T) =
   else:
     s.pack_imp_int64(int64(val))
 
-proc pack_uint_imp_select[T](s: Interface, val: T) =
+proc pack_uint_imp_select[T](s: Stream, val: T) =
   if sizeof(T) == 1:
     s.pack_imp_uint8(cast[uint8](val))
   elif sizeof(T) == 2:
@@ -549,29 +517,29 @@ proc pack_uint_imp_select[T](s: Interface, val: T) =
   else:
     s.pack_imp_uint64(cast[uint64](val))
 
-proc pack_type*(s: Interface, val: int) =
+proc pack_type*(s: Stream, val: int) =
   pack_int_imp_select(s, val)
 
-proc pack_type*(s: Interface, val: uint) =
+proc pack_type*(s: Stream, val: uint) =
   pack_uint_imp_select(s, val)
 
-proc pack_imp_float32(s: Interface, val: float32) {.inline.} =
+proc pack_imp_float32(s: Stream, val: float32) {.inline.} =
   let tmp = cast[uint32](val)
   s.write(chr(0xca))
   s.store32(tmp)
 
-proc pack_imp_float64(s: Interface, val: float64) {.inline.} =
+proc pack_imp_float64(s: Stream, val: float64) {.inline.} =
   let tmp = cast[uint64](val)
   s.write(chr(0xcb))
   s.store64(tmp)
 
-proc pack_type*(s: Interface, val: float32) =
+proc pack_type*(s: Stream, val: float32) =
   s.pack_imp_float32(val)
 
-proc pack_type*(s: Interface, val: float64) =
+proc pack_type*(s: Stream, val: float64) =
   s.pack_imp_float64(val)
 
-proc pack_type*(s: Interface, val: SomeReal) =
+proc pack_type*(s: Stream, val: SomeReal) =
   when sizeof(val) == sizeof(float32):
     s.pack_imp_float32(float32(val))
   elif sizeof(val) == sizeof(float64):
@@ -579,12 +547,12 @@ proc pack_type*(s: Interface, val: SomeReal) =
   else:
     raise conversionError("float")
 
-proc pack_type*[T](s: Interface, val: set[T]) =
+proc pack_type*[T](s: Stream, val: set[T]) =
   s.pack_array(card(val))
   for e in items(val):
     s.pack_imp_uint64(uint64(e))
 
-proc pack_items_imp[T](s: Interface, val: T) {.inline.} =
+proc pack_items_imp[T](s: Stream, val: T) {.inline.} =
   var ss = newStringStream()
   var count = 0
   for i in items(val):
@@ -593,7 +561,7 @@ proc pack_items_imp[T](s: Interface, val: T) {.inline.} =
   s.pack_array(count)
   s.write(ss.data)
 
-proc pack_type*(s: Interface, val: IntSet) =
+proc pack_type*(s: Stream, val: IntSet) =
   var ss = newStringStream()
   var count = 0
   for i in items(val):
@@ -602,81 +570,81 @@ proc pack_type*(s: Interface, val: IntSet) =
   s.pack_array(count)
   s.write(ss.data)
 
-proc pack_type*[T](s: Interface, val: SinglyLinkedList[T]) =
+proc pack_type*[T](s: Stream, val: SinglyLinkedList[T]) =
   s.pack_items_imp(val)
 
-proc pack_type*[T](s: Interface, val: DoublyLinkedList[T]) =
+proc pack_type*[T](s: Stream, val: DoublyLinkedList[T]) =
   s.pack_items_imp(val)
 
-proc pack_type*[T](s: Interface, val: SinglyLinkedRing[T]) =
+proc pack_type*[T](s: Stream, val: SinglyLinkedRing[T]) =
   s.pack_items_imp(val)
 
-proc pack_type*[T](s: Interface, val: DoublyLinkedRing[T]) =
+proc pack_type*[T](s: Stream, val: DoublyLinkedRing[T]) =
   s.pack_items_imp(val)
 
-proc pack_type*[T](s: Interface, val: Queue[T]) =
+proc pack_type*[T](s: Stream, val: Queue[T]) =
   s.pack_array(val.len)
   for i in items(val): s.pack_type undistinct(i)
 
-proc pack_type*[T](s: Interface, val: HashSet[T]) =
+proc pack_type*[T](s: Stream, val: HashSet[T]) =
   s.pack_array(val.len)
   for i in items(val): s.pack_type undistinct(i)
 
-proc pack_type*[T](s: Interface, val: OrderedSet[T]) =
+proc pack_type*[T](s: Stream, val: OrderedSet[T]) =
   s.pack_array(val.len)
   for i in items(val): s.pack_type undistinct(i)
 
-proc pack_map_imp[T](s: Interface, val: T) {.inline.} =
+proc pack_map_imp[T](s: Stream, val: T) {.inline.} =
   s.pack_map(val.len)
   for k,v in pairs(val):
     s.pack_type undistinct(k)
     s.pack_type undistinct(v)
 
-proc pack_type*[K,V](s: Interface, val: Table[K,V]) =
+proc pack_type*[K,V](s: Stream, val: Table[K,V]) =
   s.pack_map_imp(val)
 
-proc pack_type*[K,V](s: Interface, val: TableRef[K,V]) =
+proc pack_type*[K,V](s: Stream, val: TableRef[K,V]) =
   if isNil(val): s.pack_imp_nil()
   else:
     s.pack_map_imp(val)
 
-proc pack_type*[K,V](s: Interface, val: OrderedTable[K,V]) =
+proc pack_type*[K,V](s: Stream, val: OrderedTable[K,V]) =
   s.pack_map_imp(val)
 
-proc pack_type*[K,V](s: Interface, val: OrderedTableRef[K,V]) =
+proc pack_type*[K,V](s: Stream, val: OrderedTableRef[K,V]) =
   if isNil(val): s.pack_imp_nil()
   else:
     s.pack_map_imp(val)
 
-proc pack_type*(s: Interface, val: StringTableRef) =
+proc pack_type*(s: Stream, val: StringTableRef) =
   if isNil(val): s.pack_imp_nil()
   else:
     s.pack_map_imp(val)
 
-proc pack_type*(s: Interface, val: CritBitTree[void]) =
+proc pack_type*(s: Stream, val: CritBitTree[void]) =
   s.pack_array(val.len)
   for i in items(val): s.pack_type(i)
 
-proc pack_type*[T](s: Interface, val: CritBitTree[T]) =
+proc pack_type*[T](s: Stream, val: CritBitTree[T]) =
   s.pack_map_imp(val)
 
-proc pack_type*[T](s: Interface, val: openarray[T]) =
+proc pack_type*[T](s: Stream, val: openarray[T]) =
   s.pack_array(val.len)
   for i in 0..val.len-1: s.pack_type undistinct(val[i])
 
-proc pack_type*[T](s: Interface, val: seq[T]) =
+proc pack_type*[T](s: Stream, val: seq[T]) =
   if isNil(val): s.pack_imp_nil()
   else:
     s.pack_array(val.len)
     for i in 0..val.len-1: s.pack_type undistinct(val[i])
     
-proc pack_type*[T: enum|range](s: Interface, val: T) =
+proc pack_type*[T: enum|range](s: Stream, val: T) =
   when val is range:
     pack_int_imp_select(s, val.int64)
   else:
     pack_int_imp_select(s, val)
 
-proc pack_type*[T: tuple|object](s: Interface, val: T) =
+proc pack_type*[T: tuple|object](s: Stream, val: T) =
   var len = 0
   for field in fields(val):
     inc(len)
@@ -694,28 +662,28 @@ proc pack_type*[T: tuple|object](s: Interface, val: T) =
     for field in fields(val):
       s.pack_type undistinct(field)
 
-proc pack_type*[T: ref](s: Interface, val: T) =
+proc pack_type*[T: ref](s: Stream, val: T) =
   if isNil(val): s.pack_imp_nil()
   else: s.pack_type(val[])
 
-proc pack_type*[T](s: Interface, val: ptr T) =
+proc pack_type*[T](s: Stream, val: ptr T) =
   if isNil(val): s.pack_imp_nil()
   else: s.pack_type(val[])
 
-proc unpack_type*(s: Interface, val: var bool) =
+proc unpack_type*(s: Stream, val: var bool) =
   let c = s.readChar
   if c == chr(0xc3): val = true
   elif c == chr(0xc2): val = false
   else: raise conversionError("bool")
 
-proc unpack_type*(s: Interface, val: var char) =
+proc unpack_type*(s: Stream, val: var char) =
   let c = s.readChar
   if c < chr(128): val = c
   elif c == chr(0xcc):
     val = s.readChar
   else: raise conversionError("char")
 
-proc unpack_string*(s: Interface): int =
+proc unpack_string*(s: Stream): int =
   result = -1
   let c = s.readChar
   if c >= chr(0xa0) and c <= chr(0xbf): result = ord(c) and 0x1f
@@ -726,7 +694,7 @@ proc unpack_string*(s: Interface): int =
   elif c == chr(0xdb):
     result = int(s.unstore32())
 
-proc unpack_type*(s: Interface, val: var string) =
+proc unpack_type*(s: Stream, val: var string) =
   let pos = s.getPosition()
   if s.readChar == pack_value_nil:
     val = ""
@@ -737,31 +705,31 @@ proc unpack_type*(s: Interface, val: var string) =
   if len < 0: raise conversionError("string")
   val = s.readStr(len)
 
-proc unpack_type*(s: Interface, val: var uint8) =
+proc unpack_type*(s: Stream, val: var uint8) =
   val = s.unpack_imp_uint8()
 
-proc unpack_type*(s: Interface, val: var uint16) =
+proc unpack_type*(s: Stream, val: var uint16) =
   val = s.unpack_imp_uint16()
 
-proc unpack_type*(s: Interface, val: var uint32) =
+proc unpack_type*(s: Stream, val: var uint32) =
   val = s.unpack_imp_uint32()
 
-proc unpack_type*(s: Interface, val: var uint64) =
+proc unpack_type*(s: Stream, val: var uint64) =
   val = s.unpack_imp_uint64()
 
-proc unpack_type*(s: Interface, val: var int8) =
+proc unpack_type*(s: Stream, val: var int8) =
   val = s.unpack_imp_int8()
 
-proc unpack_type*(s: Interface, val: var int16) =
+proc unpack_type*(s: Stream, val: var int16) =
   val = s.unpack_imp_int16()
 
-proc unpack_type*(s: Interface, val: var int32) =
+proc unpack_type*(s: Stream, val: var int32) =
   val = s.unpack_imp_int32()
 
-proc unpack_type*(s: Interface, val: var int64) =
+proc unpack_type*(s: Stream, val: var int64) =
   val = s.unpack_imp_int64()
 
-proc unpack_int_imp_select[T](s: Interface, val: var T) =
+proc unpack_int_imp_select[T](s: Stream, val: var T) =
   when sizeof(T) == 1:
     val = T(s.unpack_imp_int8())
   elif sizeof(T) == 2:
@@ -771,10 +739,10 @@ proc unpack_int_imp_select[T](s: Interface, val: var T) =
   else:
     val = int(s.unpack_imp_int64())
 
-proc unpack_type*(s: Interface, val: var int) =
+proc unpack_type*(s: Stream, val: var int) =
   unpack_int_imp_select(s, val)
 
-proc unpack_type*(s: Interface, val: var uint) =
+proc unpack_type*(s: Stream, val: var uint) =
   if sizeof(val) == 1:
     val = s.unpack_imp_uint8()
   elif sizeof(val) == 2:
@@ -784,27 +752,27 @@ proc unpack_type*(s: Interface, val: var uint) =
   else:
     val = uint(s.unpack_imp_uint64())
 
-proc unpack_imp_float32*(s: Interface): float32 {.inline.} =
+proc unpack_imp_float32*(s: Stream): float32 {.inline.} =
   let c = s.readChar
   if c == chr(0xca):
     result = cast[float32](s.unstore32)
   else:
     raise conversionError("float32")
 
-proc unpack_imp_float64*(s: Interface): float64 {.inline.} =
+proc unpack_imp_float64*(s: Stream): float64 {.inline.} =
   let c = s.readChar
   if c == chr(0xcb):
     result = cast[float64](s.unstore64)
   else:
     raise conversionError("float64")
 
-proc unpack_type*(s: Interface, val: var float32) =
+proc unpack_type*(s: Stream, val: var float32) =
   val = s.unpack_imp_float32()
 
-proc unpack_type*(s: Interface, val: var float64) =
+proc unpack_type*(s: Stream, val: var float64) =
   val = s.unpack_imp_float64()
 
-proc unpack_type*(s: Interface, val: var SomeReal) =
+proc unpack_type*(s: Stream, val: var SomeReal) =
   when sizeof(val) == sizeof(float32):
     result = float32(s.unpack_imp_float32())
   elif sizeof(val) == sizeof(float64):
@@ -812,7 +780,7 @@ proc unpack_type*(s: Interface, val: var SomeReal) =
   else:
     raise conversionError("float")
 
-proc unpack_array*(s: Interface): int =
+proc unpack_array*(s: Stream): int =
   result = -1
   let c = s.readChar
   if c >= chr(0x90) and c <= chr(0x9f): result = ord(c) and 0x0f
@@ -821,7 +789,7 @@ proc unpack_array*(s: Interface): int =
   elif c == chr(0xdd):
     result = int(s.unstore32())
 
-proc unpack_type*[T](s: Interface, val: var set[T]) =
+proc unpack_type*[T](s: Stream, val: var set[T]) =
   let len = s.unpack_array()
   if len < 0: raise conversionError("set")
   var x: T
@@ -829,7 +797,7 @@ proc unpack_type*[T](s: Interface, val: var set[T]) =
     x = T(s.unpack_imp_uint64())
     val.incl(x)
 
-proc unpack_type*(s: Interface, val: var IntSet) =
+proc unpack_type*(s: Stream, val: var IntSet) =
   val = initIntSet()
   let len = s.unpack_array()
   if len < 0: raise conversionError("int set")
@@ -851,23 +819,23 @@ template unpack_items_imp(s: expr, val: expr, msg: expr) =
   for i in 0..len-1:
     val.prepend(y.pop())
 
-proc unpack_type*[T](s: Interface, val: var SinglyLinkedList[T]) =
+proc unpack_type*[T](s: Stream, val: var SinglyLinkedList[T]) =
   val = initSinglyLinkedList[T]()
   s.unpack_items_imp(val, "singly linked list")
 
-proc unpack_type*[T](s: Interface, val: var DoublyLinkedList[T]) =
+proc unpack_type*[T](s: Stream, val: var DoublyLinkedList[T]) =
   val = initDoublyLinkedList[T]()
   s.unpack_items_imp(val, "doubly linked list")
 
-proc unpack_type*[T](s: Interface, val: var SinglyLinkedRing[T]) =
+proc unpack_type*[T](s: Stream, val: var SinglyLinkedRing[T]) =
   val = initSinglyLinkedRing[T]()
   s.unpack_items_imp(val, "singly linked ring")
 
-proc unpack_type*[T](s: Interface, val: var DoublyLinkedRing[T]) =
+proc unpack_type*[T](s: Stream, val: var DoublyLinkedRing[T]) =
   val = initDoublyLinkedRing[T]()
   s.unpack_items_imp(val, "doubly linked ring")
 
-proc unpack_type*[T](s: Interface, val: var Queue[T]) =
+proc unpack_type*[T](s: Stream, val: var Queue[T]) =
   let len = s.unpack_array()
   if len < 0: raise conversionError("queue")
 
@@ -877,7 +845,7 @@ proc unpack_type*[T](s: Interface, val: var Queue[T]) =
     s.unpack(x)
     val.add(x)
 
-proc unpack_type*[T](s: Interface, val: var HashSet[T]) =
+proc unpack_type*[T](s: Stream, val: var HashSet[T]) =
   let len = s.unpack_array()
   if len < 0: raise conversionError("hash set")
 
@@ -887,7 +855,7 @@ proc unpack_type*[T](s: Interface, val: var HashSet[T]) =
     s.unpack(x)
     val.incl(x)
 
-proc unpack_type*[T](s: Interface, val: var OrderedSet[T]) =
+proc unpack_type*[T](s: Stream, val: var OrderedSet[T]) =
   let len = s.unpack_array()
   if len < 0: raise conversionError("ordered set")
 
@@ -897,7 +865,7 @@ proc unpack_type*[T](s: Interface, val: var OrderedSet[T]) =
     s.unpack(x)
     val.incl(x)
 
-proc unpack_map*(s: Interface): int =
+proc unpack_map*(s: Stream): int =
   result = -1
   let c = s.readChar
   if c >= chr(0x80) and c <= chr(0x8f): result = ord(c) and 0x0f
@@ -906,7 +874,7 @@ proc unpack_map*(s: Interface): int =
   elif c == chr(0xdf):
     result = int(s.unstore32())
 
-proc unpack_type*[K,V](s: Interface, val: var Table[K,V]) =
+proc unpack_type*[K,V](s: Stream, val: var Table[K,V]) =
   let len = s.unpack_map()
   if len < 0: raise conversionError("table")
 
@@ -918,7 +886,7 @@ proc unpack_type*[K,V](s: Interface, val: var Table[K,V]) =
     s.unpack(v)
     val[k] = v
 
-proc unpack_type*[K,V](s: Interface, val: var TableRef[K,V]) =
+proc unpack_type*[K,V](s: Stream, val: var TableRef[K,V]) =
   let pos = s.getPosition()
   if s.readChar == pack_value_nil: return
 
@@ -934,7 +902,7 @@ proc unpack_type*[K,V](s: Interface, val: var TableRef[K,V]) =
     s.unpack(v)
     val[k] = v
 
-proc unpack_type*[K,V](s: Interface, val: var OrderedTable[K,V]) =
+proc unpack_type*[K,V](s: Stream, val: var OrderedTable[K,V]) =
   let len = s.unpack_map()
   if len < 0: raise conversionError("ordered table")
 
@@ -946,7 +914,7 @@ proc unpack_type*[K,V](s: Interface, val: var OrderedTable[K,V]) =
     s.unpack(v)
     val[k] = v
 
-proc unpack_type*[K,V](s: Interface, val: var OrderedTableRef[K,V]) =
+proc unpack_type*[K,V](s: Stream, val: var OrderedTableRef[K,V]) =
   let pos = s.getPosition()
   if s.readChar == pack_value_nil: return
 
@@ -962,7 +930,7 @@ proc unpack_type*[K,V](s: Interface, val: var OrderedTableRef[K,V]) =
     s.unpack(v)
     val[k] = v
 
-proc unpack_type*(s: Interface, val: var StringTableRef) =
+proc unpack_type*(s: Stream, val: var StringTableRef) =
   let pos = s.getPosition()
   if s.readChar == pack_value_nil: return
 
@@ -977,7 +945,7 @@ proc unpack_type*(s: Interface, val: var StringTableRef) =
     s.unpack_type(v)
     val[k] = v
 
-proc unpack_type*(s: Interface, val: var CritBitTree[void]) =
+proc unpack_type*(s: Stream, val: var CritBitTree[void]) =
   let len = s.unpack_array()
   if len < 0: raise conversionError("critbit tree")
   var key: string
@@ -985,7 +953,7 @@ proc unpack_type*(s: Interface, val: var CritBitTree[void]) =
     s.unpack_type(key)
     val.incl(key)
 
-proc unpack_type*[T](s: Interface, val: var CritBitTree[T]) =
+proc unpack_type*[T](s: Stream, val: var CritBitTree[T]) =
   let len = s.unpack_map()
   if len < 0: raise conversionError("critbit tree")
 
@@ -996,7 +964,7 @@ proc unpack_type*[T](s: Interface, val: var CritBitTree[T]) =
     s.unpack(v)
     val[k] = v
 
-proc unpack_type*[T](s: Interface, val: var seq[T]) =
+proc unpack_type*[T](s: Stream, val: var seq[T]) =
   let pos = s.getPosition()
   if s.readChar == pack_value_nil:
     val = @[]
@@ -1011,7 +979,7 @@ proc unpack_type*[T](s: Interface, val: var seq[T]) =
     s.unpack(x)
     val[i] = x
 
-proc unpack_type*[T](s: Interface, val: var openarray[T]) =
+proc unpack_type*[T](s: Stream, val: var openarray[T]) =
   let len = s.unpack_array()
   if len < 0: raise conversionError("openarray")
   var x:T
@@ -1019,7 +987,7 @@ proc unpack_type*[T](s: Interface, val: var openarray[T]) =
     s.unpack(x)
     val[i] = x
 
-proc unpack_type*[T: enum|range](s: Interface, val: var T) =
+proc unpack_type*[T: enum|range](s: Stream, val: var T) =
   when val is range:
     var tmp = s.unpack_imp_int64
     val = T(tmp)
@@ -1029,7 +997,7 @@ proc unpack_type*[T: enum|range](s: Interface, val: var T) =
 #bug #4 remedy
 #don't know why the above proc cannot capture enum type properly
 #that's why we need a proxy here    
-proc unpack_enum_proxy*[T](s: Interface, val: T): T =
+proc unpack_enum_proxy*[T](s: Stream, val: T): T =
   result = T(s.unpack_imp_int64)
 
 macro unpack_proxy(n: typed): stmt =
@@ -1040,7 +1008,7 @@ macro unpack_proxy(n: typed): stmt =
     result = quote do:
       s.unpack `n`
   
-proc unpack_type*[T: tuple|object](s: Interface, val: var T) =
+proc unpack_type*[T: tuple|object](s: Stream, val: var T) =
   when defined(msgpack_obj_to_map):
     let len = s.unpack_map()
     var name: string
@@ -1057,21 +1025,21 @@ proc unpack_type*[T: tuple|object](s: Interface, val: var T) =
     for field in fields(val):
       unpack_proxy(field) 
       
-proc unpack_type*[T: ref](s: Interface, val: var T) =
+proc unpack_type*[T: ref](s: Stream, val: var T) =
   let pos = s.getPosition()
   if s.readChar == pack_value_nil: return
   s.setPosition(pos)
   if isNil(val): new(val)
   s.unpack(val[])
 
-proc unpack_type*[T](s: Interface, val: var ptr T) =
+proc unpack_type*[T](s: Stream, val: var ptr T) =
   let pos = s.getPosition()
   if s.readChar == pack_value_nil: return
   s.setPosition(pos)
   if isNil(val): val = cast[ptr T](alloc(sizeof(T)))
   s.unpack(val[])
 
-proc unpack_bin*(s: Interface): int =
+proc unpack_bin*(s: Stream): int =
   let c = s.readChar
   if c == chr(0xc4):
     result = ord(s.readChar)
@@ -1082,7 +1050,7 @@ proc unpack_bin*(s: Interface): int =
   else:
     raise conversionError("bin")
 
-proc unpack_ext*(s: Interface): tuple[exttype:uint8, len: int] =
+proc unpack_ext*(s: Stream): tuple[exttype:uint8, len: int] =
   let c = s.readChar
   case c
   of chr(0xd4):
@@ -1116,32 +1084,32 @@ proc unpack_ext*(s: Interface): tuple[exttype:uint8, len: int] =
     else:
       raise conversionError("ext")
 
-proc pack_type*[T: proc](s: Interface, val: T) =
+proc pack_type*[T: proc](s: Stream, val: T) =
   discard
   #raise conversionError("can't convert proc type")
 
-proc unpack_type*[T: proc](s: Interface, val: var T) =
+proc unpack_type*[T: proc](s: Stream, val: var T) =
   discard
   #raise conversionError("can't convert proc type")
 
-proc pack_type*(s: Interface, val: cstring) =
+proc pack_type*(s: Stream, val: cstring) =
   discard
   #raise conversionError("can't convert cstring type")
 
-proc unpack_type*(s: Interface, val: var cstring) =
+proc unpack_type*(s: Stream, val: var cstring) =
   discard
   #raise conversionError("can't convert cstring type")
 
-proc pack_type*(s: Interface, val: pointer) =
+proc pack_type*(s: Stream, val: pointer) =
   discard
   #raise conversionError("can't convert pointer type")
 
-proc unpack_type*(s: Interface, val: var pointer) =
+proc unpack_type*(s: Stream, val: var pointer) =
   discard
   #raise conversionError("can't convert pointer type")
 
-proc pack*[T](s: Interface, val: T) = s.pack_type undistinct(val)
-proc unpack*[T](s: Interface, val: var T) = s.unpack_type undistinct(val)
+proc pack*[T](s: Stream, val: T) = s.pack_type undistinct(val)
+proc unpack*[T](s: Stream, val: var T) = s.unpack_type undistinct(val)
 
 proc pack*[T](val: T): string =
   var s = newStringStream()
@@ -1153,7 +1121,7 @@ proc unpack*[T](data: string, val: var T) =
   s.setPosition(0)
   s.unpack(val)
 
-proc stringify(s: Interface, zz: Interface) =
+proc stringify(s: Stream, zz: Stream) =
   let pos = s.getPosition()
   let c = ord(s.readChar)
   var len = 0
@@ -1291,7 +1259,7 @@ proc newMsgAny(msgType: anyType): msgAny =
   new(result)
   result.msgType = msgType
   
-proc toAny*(s: Interface): msgAny =
+proc toAny*(s: Stream): msgAny =
   let pos = s.getPosition()
   let c = ord(s.readChar)
   case c
@@ -1362,4 +1330,3 @@ proc toAny*(s: Interface): msgAny =
 proc toAny*(data: string): msgAny =
   var s = newStringStream(data)
   result = s.toAny()
-
